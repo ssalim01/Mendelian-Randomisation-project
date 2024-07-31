@@ -1,0 +1,264 @@
+
+1.1. Install the necessary packages
+
+```{r}
+# Install necessary packages
+install.packages("devtools")
+devtools::install_github("MRCIEU/TwoSampleMR")
+devtools::install_github("MRCIEU/ieugwasr")
+install.packages("MendelianRandomization")
+install.packages("MRPRESSO")
+```
+
+1.2. Load the necessary packages
+
+```{r}
+# Load the required libraries
+library(TwoSampleMR)
+library(dplyr)
+library(MendelianRandomization)
+```
+
+2. Load and format the outcome and summary data
+
+```{r}
+# Load exposure summary data
+exposure_file <- "/Users/sanjeedahs/Desktop/NEWMR/HF/HF.tsv"
+exposure_data <- read.table(exposure_file, header = TRUE, sep = "\t")
+
+# outcome_data is already loaded and formatted in the Global Environment
+
+# Format the exposure data
+exposure_data <- format_data(
+  exposure_data,
+  type = "exposure",
+  snp_col = "SNP",
+  beta_col = "beta",
+  se_col = "se",
+  effect_allele_col = "effect_allele",
+  other_allele_col = "other_allele",
+  eaf_col = "eaf",
+  pval_col = "pval",
+  chr_col = "chr",
+  pos_col = "bp_loc"
+)
+
+# Check the formatted data
+head(exposure_data)
+head(outcome_data)
+```
+
+3. Perform LD clumping
+
+```{r}
+# Set API endpoint
+options(ieugwasr_api = 'gwas-api.mrcieu.ac.uk/')
+
+# Perform LD clumping
+HF_clump <- clump_data(exposure_data, clump_r2 = 0.01, pop = "EUR")
+
+```
+
+4. Harmonise the clumped and outcome data
+
+```{r}
+# Harmonise the data
+HF_harmonised_data <- harmonise_data(HF_clump, outcome_data)
+
+# Check the number of SNPs after clumping and harmonization
+print(paste("Number of SNPs after clumping:", nrow(HF_clump)))
+print(paste("Number of SNPs after harmonization:", nrow(HF_harmonised_data)))
+
+```
+
+5. Perform univariable MR
+
+```{r}
+# Perform Mendelian Randomisation analysis
+HF_mr_results <- mr(HF_harmonised_data)
+
+```
+
+6. Test for heterogeneity 
+
+```{r}
+# Test for heterogeneity
+HF_heterogeneity_results <- mr_heterogeneity(HF_harmonised_data)
+```
+
+7. Test for pleiotropy
+
+```{r}
+# Test for pleiotropy
+HF_pleiotropy_results <- mr_pleiotropy_test(HF_harmonised_data)
+
+```
+
+8. Calculate 95% confidence intervals: 
+
+```{r}
+# Calculate 95% Confidence Intervals
+HF_mr_results <- HF_mr_results %>%
+  mutate(lower_ci = b - 1.96 * se,
+         upper_ci = b + 1.96 * se)
+
+```
+
+9. View the results for univariable MR, heterogeneity and pleiotropy
+
+```{r}
+# Print the results
+print("Mendelian Randomisation Results with 95% Confidence Intervals:")
+print(HF_mr_results)
+
+print("Heterogeneity Test Results:")
+print(HF_heterogeneity_results)
+
+print("Pleiotropy Test Results:")
+print(HF_pleiotropy_results)
+
+```
+
+10. Find the number of SNPs after clumping and harmonisation
+```{r}
+print(paste("Number of SNPs after clumping:", nrow(BMI_clump)))
+print(paste("Number of SNPs after harmonisation:", nrow(BMI_harmonised_data)))
+```
+
+
+11. MR IVW analysis using the 'MendelianRandomization' package
+
+11.1. Install 'MendelianRandomization' package
+
+```{r}
+# install required package
+install.packages("MendelianRandomization")
+```
+
+11.2. Load required package
+
+```{r}
+library(MendelianRandomization) 
+```
+
+11.3. Run MR IVW
+
+```{r}
+
+# Create the input data object
+mrdata <- mr_input(
+  bx = HF_harmonised_data$beta.exposure,
+  bxse = HF_harmonised_data$se.exposure,
+  by = HF_harmonised_data$beta.outcome,
+  byse = HF_harmonised_data$se.outcome,
+  snps = HF_harmonised_data$SNP
+)
+
+# Access the correct slots
+b_exp <- mrdata@betaX
+b_out <- mrdata@betaY
+se_exp <- mrdata@betaXse
+se_out <- mrdata@betaYse
+
+# Run the IVW analysis with explicit arguments
+result_ivw <- mr_ivw(b_exp = b_exp, b_out = b_out, se_exp = se_exp, se_out = se_out)
+
+# Display the result
+print(result_ivw)
+
+```
+
+11.4. Extract confidence intervals
+
+```{r}
+# Extract detailed results
+ivw_estimate <- result_ivw$b
+ivw_se <- result_ivw$se
+ivw_ci_lower <- result_ivw$b - 1.96 * result_ivw$se
+ivw_ci_upper <- result_ivw$b + 1.96 * result_ivw$se
+ivw_pval <- result_ivw$pval
+
+# Print detailed IVW results
+print(paste("Estimate: ", ivw_estimate))
+print(paste("Standard Error: ", ivw_se))
+print(paste("95% Confidence Interval: [", ivw_ci_lower, ", ", ivw_ci_upper, "]", sep = ""))
+print(paste("P-value: ", format(ivw_pval, scientific = TRUE)))
+
+```
+
+12. Leave-one-out analysis
+
+```{r}
+# Leave-one-out analysis
+loo_results <- mr_leaveoneout(HF_harmonised_data)
+mr_leaveoneout_plot <- mr_leaveoneout_plot(loo_results)
+print(mr_leaveoneout_plot)
+
+```
+
+13. Visualising results
+
+13.1. Forest plot
+
+```{r}
+# Calculate 95% Confidence Intervals for individual SNPs
+HF_harmonised_data <- HF_harmonised_data %>%
+  mutate(lower_ci = beta.outcome - 1.96 * se.outcome,
+         upper_ci = beta.outcome + 1.96 * se.outcome)
+
+# Create forest plot
+forest_plot <- ggplot(HF_harmonised_data, aes(y = reorder(SNP, beta.outcome), x = beta.outcome)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower_ci, xmax = upper_ci), height = 0.2) +
+  labs(x = "MR effect size for 'HF' on 'AF' (Beta with 95% CI)", y = "SNP", title = "Forest Plot of MR Results for Individual SNPs for HF and AF") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 3)) 
+
+# Print forest plot
+print(forest_plot)
+```
+
+13.2. Funnel plot
+
+```{r}
+
+# Create a funnel plot using individual SNPs
+funnel_plot <- ggplot(HF_harmonised_data, aes(x = beta.outcome, y = 1 / se.outcome)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(x = expression("Genetic association with outcome " ~ beta[IV]), 
+       y = expression("Inverse Standard Error " ~ 1 / SE[IV]), 
+       title = "Funnel Plot to Inspect Horizontal Pleiotropy for HF and AF") +
+  theme_minimal() +
+  theme(legend.position = "none")  
+
+# Print funnel plot
+print(funnel_plot)
+```
+
+13.3. Scatter plot
+```{r}
+# Generate scatter plot
+scatter_plot <- mr_scatter_plot(HF_mr_results, HF_harmonised_data)
+
+# Print scatter plot
+print(scatter_plot[[1]]) 
+```
+
+14. View and save the individual IV's
+
+```{r}
+# View the harmonized data to see each SNP used as an IV
+head(HF_harmonised_data)
+
+# Save the harmonized data to a CSV file in the specified directory
+output_file <- "/Users/sanjeedahs/Desktop/NEWMR/HF/HF_harmonized_SNPs.csv"
+write.csv(HF_harmonised_data, output_file, row.names = FALSE)
+
+# Print confirmation
+print(paste("Harmonized SNPs data saved to:", output_file))
+```
+
+
+
+
